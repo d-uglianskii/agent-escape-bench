@@ -31,6 +31,12 @@ class Hook:
     env: dict = field(default_factory=dict)
     cwd: str | None = None  # relative to the fixture root unless absolute
     fail_closed: bool = False  # Claude Code "onFailure": "block"
+    matcher: str | None = None  # PreToolUse matcher; None means every tool (Cursor shell hooks: shell only)
+
+    def applies(self, tool: str) -> bool:
+        if self.protocol == "cursor":
+            return tool == "Bash"
+        return _matcher_hits(self.matcher, tool)
 
 
 @dataclass
@@ -49,19 +55,21 @@ def _matcher_hits(matcher: str | None, tool: str = "Bash") -> bool:
         return tool in matcher
 
 
-def _claude_entries(hooks_obj: dict, source: str, env: dict | None = None) -> list[Hook]:
+def _claude_entries(hooks_obj: dict, source: str, env: dict | None = None, tool: str | None = "Bash") -> list[Hook]:
+    """PreToolUse command hooks. tool="Bash" keeps the hooks that see shell commands; tool=None keeps all."""
     out = []
     for entry in (hooks_obj or {}).get("PreToolUse", []) or []:
-        if not _matcher_hits(entry.get("matcher")):
+        if tool is not None and not _matcher_hits(entry.get("matcher"), tool):
             continue
         for h in entry.get("hooks", []) or []:
             if h.get("type", "command") == "command" and h.get("command"):
                 out.append(Hook(h["command"], "claude", source, float(h.get("timeout", 30)), dict(env or {}),
-                                fail_closed=str(h.get("onFailure", "")).lower() == "block"))
+                                fail_closed=str(h.get("onFailure", "")).lower() == "block",
+                                matcher=entry.get("matcher")))
     return out
 
 
-def discover_claude(repo: Path, user_settings: bool = False) -> list[Hook]:
+def discover_claude(repo: Path, user_settings: bool = False, tool: str | None = "Bash") -> list[Hook]:
     files = [repo / ".claude" / "settings.json", repo / ".claude" / "settings.local.json"]
     if user_settings:
         files.append(Path.home() / ".claude" / "settings.json")
@@ -72,16 +80,16 @@ def discover_claude(repo: Path, user_settings: bool = False) -> list[Hook]:
                 data = json.loads(f.read_text(encoding="utf-8"))
             except ValueError as exc:
                 raise SystemExit(f"cannot parse {f}: {exc}")
-            hooks += _claude_entries(data.get("hooks") or {}, str(f))
+            hooks += _claude_entries(data.get("hooks") or {}, str(f), tool=tool)
     return hooks
 
 
-def discover_plugin(plugin: Path) -> list[Hook]:
+def discover_plugin(plugin: Path, tool: str | None = "Bash") -> list[Hook]:
     f = plugin / "hooks" / "hooks.json"
     if not f.is_file():
         raise SystemExit(f"no hooks/hooks.json in {plugin}")
     data = json.loads(f.read_text(encoding="utf-8"))
-    return _claude_entries(data.get("hooks") or {}, str(f), {"CLAUDE_PLUGIN_ROOT": str(plugin.resolve())})
+    return _claude_entries(data.get("hooks") or {}, str(f), {"CLAUDE_PLUGIN_ROOT": str(plugin.resolve())}, tool)
 
 
 def discover_cursor(repo: Path, user_settings: bool = False) -> list[Hook]:
@@ -101,13 +109,14 @@ def discover_cursor(repo: Path, user_settings: bool = False) -> list[Hook]:
     return hooks
 
 
-def payload(protocol: str, command: str, root: Path, session: str, n: int) -> dict:
+def payload(protocol: str, command: str, root: Path, session: str, n: int,
+            tool: str = "Bash", tool_input: dict | None = None) -> dict:
     if protocol == "cursor":
         return {"conversation_id": session, "generation_id": f"{session}-{n}", "command": command,
                 "cwd": str(root), "hook_event_name": "beforeShellExecution", "workspace_roots": [str(root)]}
     return {"session_id": session, "transcript_path": str(root / ".aeb-transcript.jsonl"), "cwd": str(root),
-            "permission_mode": "default", "hook_event_name": "PreToolUse", "tool_name": "Bash",
-            "tool_input": {"command": command, "description": "agent-escape-bench case"}}
+            "permission_mode": "default", "hook_event_name": "PreToolUse", "tool_name": tool,
+            "tool_input": tool_input if tool_input is not None else {"command": command, "description": "agent-escape-bench case"}}
 
 
 def parse(protocol: str, code: int, stdout: str, stderr: str) -> Answer:
@@ -153,8 +162,10 @@ def parse(protocol: str, code: int, stdout: str, stderr: str) -> Answer:
     return Answer("allow")
 
 
-def call(hook: Hook, command: str, fixture, session: str, n: int) -> Answer:
-    body = json.dumps(payload(hook.protocol, command, fixture.root, session, n))
+def call(hook: Hook, command: str, fixture, session: str, n: int,
+         tool: str = "Bash", tool_input: dict | None = None) -> Answer:
+    """Ask one hook about one tool call. For Bash, command is the shell command; other tools pass tool_input."""
+    body = json.dumps(payload(hook.protocol, command, fixture.root, session, n, tool, tool_input))
     cwd = fixture.root if not hook.cwd else (Path(hook.cwd) if os.path.isabs(hook.cwd) else fixture.root / hook.cwd)
     try:
         proc = subprocess.run(hook.command, shell=True, input=body, capture_output=True, text=True,

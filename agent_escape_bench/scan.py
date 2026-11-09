@@ -22,8 +22,12 @@ SKIP_DIRS = {".git", "node_modules", "vendor", "dist", "build", ".venv", "venv",
 DIRECTIVE = re.compile(
     r"^(run|use|keep|prefer|ask|make sure|ensure)\b"
     r"|\b(never|don't|do not|must|must not|always|only|avoid|forbidden|prohibited|should not|shouldn't|required?)\b"
-    r"|(никогда|нельзя|запрещ|всегда|только|обязательно|должн|не\s+(трогай|меняй|правь|редактируй|коммить|используй|удаляй|запускай|читай|пиши|добавляй|делай|пушь))",
+    r"|(никогда|нельзя|запрещ|всегда|только|обязательно|должн|неизменя|не\s+(трогай|меняй|правь|редактируй|коммить|используй|удаляй|запускай|читай|пиши|добавляй|делай|пушь))"
+    r"|\bне\s+\w+(ать|ять|еть|ить)\b|\b(immutable|read[ -]only)\b",
     re.I)
+# A list under a heading like "Forbidden" or "Never" is a list of rules even when items carry no directive word.
+PROHIBITIVE_HEADING = re.compile(r"запрещ|нельзя|никогда|не делай|\bnever\b|don'?t|do not|forbidden|prohibited|"
+                                 r"must not|off[ -]limits|not allowed", re.I)
 
 # topic: (keywords in the rule, evidence matchers)
 TOPICS: dict[str, dict] = {
@@ -34,7 +38,7 @@ TOPICS: dict[str, dict] = {
     "agent-config": {"label": "Agent settings and hooks are off limits",
                      "kw": r"settings\.json|\.claude|\.cursor|hooks?\b.*(agent|claude)|настройк", "ev": r"\.claude|settings\.json|\.cursor"},
     "secrets": {"label": "Secrets and .env stay private",
-                "kw": r"\.env\b|secret|\btokens?\b(?!\.\w)|api[ _-]?key|credential|password|секрет|токен|\bключ|парол", "ev": r"\.env|secret|gitleaks|trufflehog|detect-secrets"},
+                "kw": r"\.env\b|secret|\btokens?\b(?!\.\w)|api[ _-]?key|credential|password|секрет|токен|парол", "ev": r"\.env|secret|gitleaks|trufflehog|detect-secrets"},
     "tests": {"label": "Tests must pass",
               "kw": r"\btests?\b|pytest|jest|vitest|go test|cargo test|тест", "ev": r"pytest|jest|vitest|go test|cargo test|npm (run )?test|pnpm test|yarn test|make test|\btest\b"},
     "lint-types": {"label": "Lint, format and types must pass",
@@ -125,16 +129,21 @@ def _glob(repo: Path, patterns: list[str]) -> list[Path]:
 
 
 def extract_rules(path: Path, repo: Path) -> list[Rule]:
-    rules, in_code = [], False
+    rules, in_code, heading = [], False, ""
     for n, raw in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
         line = raw.strip()
         if line.startswith("```"):
             in_code = not in_code
             continue
-        if in_code or not line or line.startswith(("#", "|", "---", "<!--")) or len(line) > 400:
+        if in_code:
+            continue
+        item = re.match(r"^([-*+]|\d+[.)])\s+", line)
+        if line.startswith("#") or (line.endswith(":") and len(line) < 80 and not item):
+            heading = line
+        if not line or line.startswith(("#", "|", "---", "<!--")) or len(line) > 400:
             continue
         text = re.sub(r"^([-*+]|\d+[.)])\s+", "", line).strip()
-        if len(text) < 8 or not DIRECTIVE.search(text):
+        if len(text) < 8 or not (DIRECTIVE.search(text) or (item and PROHIBITIVE_HEADING.search(heading))):
             continue
         rules.append(Rule(text, str(path.relative_to(repo)), n))
     return rules
@@ -179,6 +188,9 @@ def collect_mechanisms(repo: Path, findings: list[str]) -> list[Mechanism]:
         for kind in ("deny", "ask"):
             for rule in perms.get(kind, []) or []:
                 mech.append(Mechanism("permission", f"{f.relative_to(repo)} permissions.{kind}", str(rule).lower()))
+                if re.match(r"(Write|NotebookEdit|Glob|MultiEdit)\(.+\)$", str(rule)):
+                    findings.append(f"permissions.{kind} rule {rule!r} never matches: Claude Code checks paths against "
+                                    "Edit(...) and Read(...) rules only. Use Edit(...) with the same path.")
         for event, entries in (data.get("hooks") or {}).items():
             for entry in entries or []:
                 for h in entry.get("hooks", []) or []:
@@ -241,7 +253,8 @@ def classify(rule: Rule, mechs: list[Mechanism]) -> None:
         pattern = re.compile(TOPICS[rule.topic]["ev_ci"], re.I) if m.kind == "ci" and "ev_ci" in TOPICS[rule.topic] else ev
         if m.kind == "permission":
             tool, _, arg = m.text.partition("(")
-            family = "bash" if tool == "bash" else "file" if tool in ("read", "edit", "write", "multiedit") else ""
+            # Claude Code checks paths against Edit(...) and Read(...) only; Write(path) never matches
+            family = "bash" if tool == "bash" else "file" if tool in ("read", "edit") else ""
             if not family or rule.topic not in PERMISSION_TOPICS[family] or not pattern.search(arg):
                 continue
         if pattern.search(m.text):

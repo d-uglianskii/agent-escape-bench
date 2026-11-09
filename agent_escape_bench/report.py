@@ -196,3 +196,118 @@ def scan_html(rep: ScanReport) -> str:
             + f"<h2>Rules</h2><table><tr><th>Rule</th><th>Topic</th><th>Status</th><th>Evidence</th></tr>{rows}</table>"
             + "<p class=muted>Heuristic scan: it shows where to look, it does not prove enforcement.</p>")
     return _page("Agent rules enforcement scan", body)
+
+
+# ---------- verify ----------
+
+VERDICT_TEXT = {
+    "concrete": "every probe stopped by your hooks or deny/ask rules",
+    "partial": "stopped through some tools, open through others",
+    "review": "open in the session; CODEOWNERS covers the path at merge",
+    "obedience": "nothing stops a violation: the rule rests on the model following text",
+}
+VERDICT_ORDER = ("concrete", "partial", "review", "obedience")
+ASSUMPTION = ("Assumes an agent that works without approving each action (acceptEdits, auto mode or broad allow "
+              "rules). In Manual mode Claude Code asks before every edit, which is a person deciding, not enforcement.")
+VERIFY_FOOTER = ("Hooks were run for real against a throwaway copy of your config; nothing was executed. "
+                 "Permission rules are evaluated with a model written from the Claude Code docs, not by Claude Code.")
+
+
+def _probe_word(p) -> str:
+    if p.control:
+        return {"allow": "allowed", "ask": "ASKS", "deny": "BLOCKED"}[p.decision]
+    return {"allow": "OPEN", "ask": "asks", "deny": "denied"}[p.decision]
+
+
+def _rule_ref(c) -> list[str]:
+    return [f"{r['file']}:{r['line']}  {r['text'][:80]}" if r["file"] else r["text"] for r in c.rules[:3]]
+
+
+def verify_text(rep) -> str:
+    n = len(rep.checks)
+    lines = [f"agent-escape-bench verify {__version__}", f"repo: {rep.repo}", ASSUMPTION, ""]
+    for v in VERDICT_ORDER:
+        lines.append(f"  {v.upper():<11}{rep.count(v):>3} / {n:<3} {VERDICT_TEXT[v]}")
+    lines.append(f"  {'NOT PROBED':<11}{len(rep.not_probed):>3}       rules about judgment, tests, style or format (see aeb scan)")
+    for c in rep.checks:
+        lines += ["", f"  {c.verdict.upper():<10} {c.label}"]
+        if c.target:
+            lines.append(f"  {'':<10} target {c.target} ({c.target_note})")
+        lines += [f"  {'':<10} {ref}" for ref in _rule_ref(c)]
+        if c.builtin_prompt:
+            lines.append(f"  {'':<10} note: Claude Code itself asks before writes here in default and acceptEdits modes")
+        if c.merge_gate:
+            lines.append(f"  {'':<10} merge gate: {c.merge_gate}")
+        if c.control_blocked:
+            lines.append(f"  {'':<10} warning: the control action was blocked too, the mechanism may block everything here")
+        for p in c.probes:
+            by = f"  <- {p.stopped_by[0]}" if p.stopped_by else (f"  <- hook error, ignored by the agent: {p.error}" if p.error else "")
+            lines.append(f"      {_probe_word(p):<8} {p.via:<32} {p.shown[:60]}{by[:90]}")
+    if rep.findings:
+        lines += ["", "  Findings:", *[f"  - {f}" for f in rep.findings]]
+    lines += ["", "  Mechanisms found:", *[f"  - {m}" for m in rep.mechanisms]] if rep.mechanisms else \
+        ["", "  Mechanisms found: none (no PreToolUse hooks, no deny/ask rules, no CODEOWNERS)"]
+    lines += ["", VERIFY_FOOTER, f"Want the gaps closed? EGD assessment: d.uglianskii@gmail.com · {REPO_URL}"]
+    return "\n".join(lines)
+
+
+def verify_markdown(rep) -> str:
+    n = len(rep.checks)
+    out = ["# What is enforced, and what rests on the model", "", f"- Repository: `{rep.repo}`", f"- {ASSUMPTION}", "",
+           "| Verdict | Rules | Meaning |", "| --- | --- | --- |"]
+    out += [f"| {v} | {rep.count(v)} / {n} | {VERDICT_TEXT[v]} |" for v in VERDICT_ORDER]
+    out.append(f"| not probed | {len(rep.not_probed)} | rules about judgment, tests, style or format |")
+    for c in rep.checks:
+        out += ["", f"## {c.verdict}: {c.label}", ""]
+        if c.target:
+            out.append(f"Target `{c.target}` ({c.target_note}).")
+        out += [f"- {ref.replace('|', '/')}" for ref in _rule_ref(c)]
+        if c.builtin_prompt:
+            out.append("- Note: Claude Code itself asks before writes here in default and acceptEdits modes.")
+        if c.merge_gate:
+            out.append(f"- Merge gate: {c.merge_gate}")
+        if c.control_blocked:
+            out.append("- Warning: the control action was blocked too.")
+        out += ["", "| Result | Probe | Action | Stopped by |", "| --- | --- | --- | --- |"]
+        for p in c.probes:
+            shown = p.shown.replace("|", "\\|")
+            out.append(f"| {_probe_word(p)} | {p.via} | `{shown[:80]}` | {'; '.join(p.stopped_by).replace('|', '/') or '-'} |")
+    if rep.not_probed:
+        out += ["", "## Not probed", "", *[f"- {r['text'][:120]} (`{r['file']}:{r['line']}`): {r['why']}" for r in rep.not_probed]]
+    if rep.findings:
+        out += ["", "## Findings", "", *[f"- {f}" for f in rep.findings]]
+    out += ["", "---", "", CTA, "", " · ".join(f"[{t}]({u})" for t, u in CTA_LINKS), "", VERIFY_FOOTER]
+    return "\n".join(out)
+
+
+def verify_html(rep) -> str:
+    e = html.escape
+    n = len(rep.checks)
+    cls = {"concrete": "okk", "partial": "part", "review": "part", "obedience": "esc"}
+    kpis = "".join(f"<div class='kpi {'ok' if v == 'concrete' else 'bad' if v == 'obedience' else ''}'><b>{rep.count(v)} / {n}</b>{e(VERDICT_TEXT[v])}</div>"
+                   for v in VERDICT_ORDER)
+    blocks = []
+    for c in rep.checks:
+        rows = "".join(
+            f"<tr><td><span class='tag {'okk' if (p.stopped != p.control) else 'esc'}'>{_probe_word(p)}</span></td>"
+            f"<td>{e(p.via)}</td><td><code>{e(p.shown)}</code></td><td>{'<br>'.join(e(x) for x in p.stopped_by) or '-'}</td></tr>"
+            for p in c.probes)
+        notes = "".join(f"<li>{e(x)}</li>" for x in _rule_ref(c))
+        if c.builtin_prompt:
+            notes += "<li>Claude Code itself asks before writes here in default and acceptEdits modes.</li>"
+        if c.merge_gate:
+            notes += f"<li>Merge gate: {e(c.merge_gate)}</li>"
+        if c.control_blocked:
+            notes += "<li>The control action was blocked too.</li>"
+        target = f"<p class=muted>Target <code>{e(c.target)}</code> ({e(c.target_note)})</p>" if c.target else ""
+        blocks.append(f"<h2><span class='tag {cls[c.verdict]}'>{c.verdict}</span> {e(c.label)}</h2>{target}<ul>{notes}</ul>"
+                      f"<table><tr><th>Result</th><th>Probe</th><th>Action</th><th>Stopped by</th></tr>{rows}</table>")
+    not_probed = "".join(f"<li>{e(r['text'][:160])} <span class=muted>{e(r['file'])}:{r['line']} · {e(r['why'])}</span></li>"
+                         for r in rep.not_probed)
+    findings = "".join(f"<li>{e(f)}</li>" for f in rep.findings)
+    body = (f"<h1>What is enforced, and what rests on the model</h1><p class=muted>{e(rep.repo)}</p>"
+            f"<p class=muted>{e(ASSUMPTION)}</p><div class=kpis>{kpis}</div>"
+            + (f"<h2>Findings</h2><ul>{findings}</ul>" if findings else "") + "".join(blocks)
+            + (f"<h2>Not probed</h2><ul>{not_probed}</ul>" if not_probed else "")
+            + f"<p class=muted>{e(VERIFY_FOOTER)}</p>")
+    return _page("Agent rules verification", body)

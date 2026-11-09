@@ -1,4 +1,4 @@
-"""Command line: `aeb bench`, `aeb scan`, `aeb list`."""
+"""Command line: `aeb bench`, `aeb verify`, `aeb scan`, `aeb list`."""
 from __future__ import annotations
 
 import argparse
@@ -12,6 +12,7 @@ from . import bench as bn
 from . import hooks as hk
 from . import report as rp
 from . import scan as sc
+from . import verify as vf
 
 
 def _write(path: str | None, text: str) -> None:
@@ -92,6 +93,39 @@ def cmd_scan(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verify(a: argparse.Namespace) -> int:
+    repo = Path(a.repo).resolve()
+    hook_list = hk.discover_claude(repo, a.user_settings, tool=None)
+    if a.cursor:
+        hook_list += hk.discover_cursor(repo, a.user_settings)
+    for plugin in a.plugin or []:
+        hook_list += hk.discover_plugin(Path(plugin).resolve(), tool=None)
+    for cmd in a.hook or []:
+        hook_list.append(hk.Hook(cmd, "claude", "--hook", a.timeout, fail_closed=a.fail_closed))
+    include = []
+    for spec in a.include or []:
+        src, _, rel = spec.partition(":")
+        src_p = Path(src).resolve()
+        include.append((src_p, rel or src_p.name))
+
+    def progress(i: int, n: int) -> None:
+        if sys.stderr.isatty() and a.json != "-":
+            print(f"\r  {i}/{n}", end="" if i < n else "\n", file=sys.stderr, flush=True)
+
+    rep = vf.run(repo, hook_list, include, a.setup, a.migrations_dir, a.probe, progress)
+    rep.repo = _show(repo)
+    if a.json == "-":
+        print(json.dumps(rep.to_json(), indent=1, ensure_ascii=False))
+    else:
+        print(rp.verify_text(rep))
+        _write(a.json, json.dumps(rep.to_json(), indent=1, ensure_ascii=False))
+    _write(a.md, rp.verify_markdown(rep))
+    _write(a.html, rp.verify_html(rep))
+    if a.max_obedience is not None and rep.count("obedience") > a.max_obedience:
+        return 1
+    return 0
+
+
 def cmd_list(a: argparse.Namespace) -> int:
     cases = bn.load_corpus()
     if a.full:
@@ -136,6 +170,25 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--verbose", action="store_true", help="list every miss")
     b.add_argument("--quiet", action="store_true", help="no terminal report")
     b.set_defaults(func=cmd_bench)
+
+    v = sub.add_parser("verify", help="try to break each rule your instruction files state, and see what stops it")
+    v.add_argument("repo", nargs="?", default=".")
+    v.add_argument("--plugin", action="append", metavar="DIR", help="also run the PreToolUse hooks of a Claude Code plugin (repeatable)")
+    v.add_argument("--cursor", action="store_true", help="also run beforeShellExecution hooks from REPO/.cursor/hooks.json")
+    v.add_argument("--hook", action="append", metavar="CMD", help="an extra PreToolUse hook command (repeatable)")
+    v.add_argument("--fail-closed", action="store_true", help="treat --hook errors as blocking")
+    v.add_argument("--timeout", type=float, default=30.0, help="per call timeout for --hook commands, seconds")
+    v.add_argument("--user-settings", action="store_true", help="also load hooks from ~/.claude or ~/.cursor")
+    v.add_argument("--migrations-dir", metavar="DIR", help="where applied migrations live, if the rules do not say")
+    v.add_argument("--probe", action="append", metavar="TOPIC[:PATH]",
+                   help="probe a topic even if no rule states it, e.g. secrets:.env or force-push (repeatable)")
+    v.add_argument("--include", action="append", metavar="SRC[:REL]", help="copy SRC into the sandbox repo at REL")
+    v.add_argument("--setup", metavar="SHELL", help="shell snippet run inside the sandbox repo before probing")
+    v.add_argument("--json", metavar="FILE", help="write JSON results (- for stdout)")
+    v.add_argument("--md", metavar="FILE", help="write a Markdown report")
+    v.add_argument("--html", metavar="FILE", help="write an HTML report")
+    v.add_argument("--max-obedience", type=int, metavar="N", help="exit 1 when more than N rules rest on text alone (for CI)")
+    v.set_defaults(func=cmd_verify)
 
     s = sub.add_parser("scan", help="map agent rules to the machinery that enforces them")
     s.add_argument("repo", nargs="?", default=".")

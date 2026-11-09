@@ -14,4 +14,4 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m unittest discover -s tests -v
-      - run: pip install . && aeb list
+      - run: pip install . && aeb list && aeb verify examples/naive-guard > /dev/null

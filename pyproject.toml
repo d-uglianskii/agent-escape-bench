@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-escape-bench"
-version = "0.1.0"
-description = "Measure how many known escape techniques get past your AI coding agent's shell guard (Claude Code, Cursor)."
+version = "0.2.0"
+description = "Which of your AI coding agent's rules are enforced by code? Verify rules by trying to break them, and benchmark shell guards against 123 escape techniques (Claude Code, Cursor)."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Danil Uglianskii", email = "d.uglianskii@gmail.com" }]

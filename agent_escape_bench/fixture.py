@@ -40,7 +40,8 @@ def _git(cwd: Path, *args: str) -> None:
 class Fixture:
     def __init__(self, guard_dir: str = ".claude/hooks", guard_file: str = "guard.sh",
                  include: list[tuple[Path, str]] | None = None, setup: str | None = None,
-                 migrations_dir: str = "db/migrations"):
+                 migrations_dir: str = "db/migrations", extra_files: dict[str, str] | None = None):
+        self.extra_files = dict(extra_files or {})
         self.migrations_dir = migrations_dir.strip("/")
         self.guard_dir = guard_dir.strip("/")
         self.guard_file = guard_file
@@ -101,6 +102,7 @@ class Fixture:
                 shutil.copy2(src, dst)
         files = dict(REPO_FILES)
         files[f"{self.migrations_dir}/001_init.sql"] = "create table a(id int);\n"
+        files.update(self.extra_files)
         for rel, text in files.items():
             path = r / rel
             if not path.exists():
