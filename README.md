@@ -27,6 +27,7 @@ $ aeb bench --claude .
 
 ```bash
 pipx install git+https://github.com/d-uglianskii/agent-escape-bench   # or: pip install .
+# no pipx: git clone the repo and run "python3 -m agent_escape_bench ..." from it
 cd your-repo
 
 aeb bench --claude .        # PreToolUse Bash hooks from .claude/settings*.json
