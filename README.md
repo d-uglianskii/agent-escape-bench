@@ -26,7 +26,7 @@ $ aeb bench --claude .
 ## Install and run
 
 ```bash
-pipx install git+https://github.com/OWNER/agent-escape-bench   # or: pip install .
+pipx install git+https://github.com/d-uglianskii/agent-escape-bench   # or: pip install .
 cd your-repo
 
 aeb bench --claude .        # PreToolUse Bash hooks from .claude/settings*.json
@@ -82,13 +82,13 @@ Run `aeb list --full` to see every case.
 | Setup | Escaped | False blocks |
 | --- | --- | --- |
 | No shell hook (rules in CLAUDE.md only) | 123 / 123 | 0 / 41 |
-| [`examples/naive-guard`](examples/naive-guard): a typical hand-written `case`/`grep` guard² | 98 / 123 | 1 / 41 |
-| EGD guard 1.4, from the kit's own audit on the source corpus¹ | 81 / 123 | 3 / 41 |
+| [`examples/naive-guard`](examples/naive-guard): a typical hand-written `case`/`grep` guard¹ | 98 / 123 | 1 / 41 |
+| EGD guard 1.4, from the kit's own audit on the source corpus² | 81 / 123 | 3 / 41 |
 | EGD guard 1.5 (a shell parser, not a pattern list), run with this tool | 0 / 123 | 0 / 41 |
 
-² The example repository also has a `permissions.deny` list. The bench does not evaluate permission rules, so the figure is for the hook alone.
+¹ The example repository also has a `permissions.deny` list. The bench does not evaluate permission rules, so the figure is for the hook alone.
 
-¹ Not re-run with this tool: the 1.4 hook predates it. The audit counted 87 wrong decisions out of 164, of which 81 were silent writes to a protected path.
+² Not re-run with this tool: the 1.4 hook predates it. The audit counted 87 wrong decisions out of 164, of which 81 were silent writes to a protected path.
 
 The corpus grew out of auditing the [EGD](#who-made-this) guard: version 1.4 let 81 of these attacks through silently, and 3 of the 41 normal commands were wrongly blocked. The EGD kit also generates about 900 variants of the same techniques; only the 164 base cases are published here.
 

@@ -8,7 +8,7 @@ from . import __version__
 from .bench import Report
 from .scan import TOPICS, ScanReport
 
-REPO_URL = "https://github.com/OWNER/agent-escape-bench"
+REPO_URL = "https://github.com/d-uglianskii/agent-escape-bench"
 CTA = ("Want the gaps closed, not just counted? Evidence-Gated Delivery (EGD) assessments: "
        "risk-based gates for AI coding agents, measured against your own baseline.")
 CTA_LINKS = [("Email", "mailto:d.uglianskii@gmail.com?subject=EGD%20assessment"),

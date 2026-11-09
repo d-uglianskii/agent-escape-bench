@@ -20,7 +20,7 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/OWNER/agent-escape-bench"
+Homepage = "https://github.com/d-uglianskii/agent-escape-bench"
 
 [project.scripts]
 aeb = "agent_escape_bench.cli:main"

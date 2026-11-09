@@ -9,7 +9,7 @@
 ## Установка и запуск
 
 ```bash
-pipx install git+https://github.com/OWNER/agent-escape-bench
+pipx install git+https://github.com/d-uglianskii/agent-escape-bench
 cd your-repo
 
 aeb bench --claude .     # PreToolUse-хуки на Bash из .claude/settings*.json
