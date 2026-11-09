@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-escape-bench"
+version = "0.1.0"
+description = "Measure how many known escape techniques get past your AI coding agent's shell guard (Claude Code, Cursor)."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Danil Uglianskii", email = "d.uglianskii@gmail.com" }]
+requires-python = ">=3.9"
+dependencies = []
+keywords = ["claude-code", "cursor", "ai-agents", "guardrails", "hooks", "security", "benchmark"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Security",
+  "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.urls]
+Homepage = "https://github.com/OWNER/agent-escape-bench"
+
+[project.scripts]
+aeb = "agent_escape_bench.cli:main"
+
+[tool.setuptools]
+packages = ["agent_escape_bench"]
+
+[tool.setuptools.package-data]
+agent_escape_bench = ["corpus.json"]
